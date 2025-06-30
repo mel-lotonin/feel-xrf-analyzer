@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "feel-xrf-analyzer",
+  "productName": "Feel XRF Analyzer",
   "version": "0.1.0",
   "identifier": "ca.bluebit.feel-xrf-analyzer",
   "build": {
@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "FEEL XRF Analyzer",
-        "width": 800,
-        "height": 600
+        "width": 1280,
+        "height": 720
       }
     ],
     "security": {
