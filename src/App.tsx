@@ -70,7 +70,10 @@ function App() {
     const [tempSample, setTempSample] = useState<SampleData | null>(null);
     const prevSampleCoords = useRef<{ x: number; y: number }[]>(samplesData.map(({x, y}) => ({x, y})));
 
-    const [calibrationCurve, setCalibrationCurve] = useState<CalibrationData | null>(null)
+    const calibrationCurve = calculateRegression(refsData.filter(r => r.avgCounts && r.loading).map(r => ({
+        x: r.avgCounts!,
+        y: r.loading!
+    })));
 
     const width = map ? map[0].length : 0;
     const height = map ? map.length : 0;
@@ -101,18 +104,6 @@ function App() {
             console.error("Failed to open map file", e);
         }
     }
-
-    useEffect(() => {
-        const curve = calculateRegression(refsData.filter(r => r.avgCounts && r.loading).map(r => ({
-            x: r.avgCounts!,
-            y: r.loading!
-        })))
-
-        if (curve !== calibrationCurve) {
-            setCalibrationCurve(curve);
-        }
-
-    }, [refsData]);
 
     useEffect(() => {
         if (!map) return;
@@ -168,18 +159,13 @@ function App() {
         const refUpdates = new Map<number, number>();
 
         samplesData.forEach((sample, idx) => {
-            let prev;
-            if (prevSampleCoords.current.length < idx) {
-                prev = prevSampleCoords.current[idx];
-            }
-
-
-            if (prev === undefined || sample.x !== prev.x || sample.y !== prev.y) {
+            const prev = prevSampleCoords.current[idx];
+            if (sample.x !== prev.x || sample.y !== prev.y) {
                 let sum = 0;
 
                 for (let y = 0; y < sample.height; y++) {
                     for (let x = 0; x < sample.width; x++) {
-                        sum += map[y + sample.y][x + sample.x];
+                        sum += map[y + Math.round(sample.y)][x + Math.round(sample.x)];
                     }
                 }
 
@@ -189,13 +175,10 @@ function App() {
         });
 
         refsData.forEach((circle, idx) => {
-            let prev;
-            if (prevRefCoords.current.length < idx) {
-                prev = prevRefCoords.current[idx];
-            }
+            const prev = prevRefCoords.current[idx];
 
 
-            if (prev === undefined || circle.x !== prev.x || circle.y !== prev.y) {
+            if (circle.x !== prev.x || circle.y !== prev.y) {
                 const mask = circularMask([width, height], circle.x, circle.y, circle.r);
                 let sum = 0;
                 let count = 0;
@@ -215,37 +198,27 @@ function App() {
         });
 
         if (sampleUpdates.size !== 0) {
-            let shouldUpdate = false;
             const copy = [...samplesData];
 
             sampleUpdates.forEach((counts, idx) => {
                 if (copy[idx].avgCounts !== counts) {
                     copy[idx].avgCounts = counts;
-                    shouldUpdate = true;
                 }
             });
 
-            if (shouldUpdate) {
-                setSamplesData(copy);
-                prevSampleCoords.current = copy.map(({x, y}) => ({x, y}));
-            }
+            setSamplesData(copy);
         }
 
         if (refUpdates.size !== 0) {
-            let shouldUpdate = false;
             const copy = [...refsData];
 
             refUpdates.forEach((counts, idx) => {
                 if (copy[idx].avgCounts !== counts) {
                     copy[idx].avgCounts = counts;
-                    shouldUpdate = true;
                 }
             });
 
-            if (shouldUpdate) {
-                setRefsData(copy);
-                prevSampleCoords.current = copy.map(({x, y}) => ({x, y}));
-            }
+            setRefsData(copy);
         }
 
     }, [refsData, samplesData]);
@@ -273,7 +246,6 @@ function App() {
                 y: pos.y,
                 width: 1,
                 height: 1,
-                loading: null,
                 avgCounts: null
             });
         }
@@ -311,10 +283,13 @@ function App() {
 
     const onMouseUp = () => {
         if (drawMode === DrawMode.Reference && tempRef) {
+            prevRefCoords.current = [...refsData, {x: -1, y: -1}].map(({x, y}) => ({x, y}));
             setRefsData([...refsData, tempRef]);
+
             setTempRef(null);
             setDrawMode(DrawMode.None);
         } else if (drawMode === DrawMode.Sample && tempSample) {
+            prevSampleCoords.current = [...samplesData, {x: -1, y: -1}].map(({x, y}) => ({x, y}));
             setSamplesData([...samplesData, tempSample]);
             setTempSample(null);
             setDrawMode(DrawMode.None);
@@ -536,18 +511,13 @@ interface SampleData {
     y: number;
     width: number;
     height: number;
-    loading: number | null;
     avgCounts: number | null;
 }
 
 interface CalibrationData {
     slope: number,
-    int
-        :
-        number,
-    r
-        :
-        number
+    int: number,
+    r: number
 }
 
 enum DrawMode {
