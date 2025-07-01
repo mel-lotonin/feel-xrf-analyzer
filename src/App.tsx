@@ -1,13 +1,12 @@
-import {useEffect, useMemo, useRef, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {invoke} from "@tauri-apps/api/core";
 import {open} from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
-import {Circle, Image as KImage, Layer, Stage, Text, Rect} from "react-konva";
+import {Circle, Image as KImage, Layer, Rect, Stage, Text} from "react-konva";
 import './ColorMaps.tsx'
 import {Color, CoolMap} from "./ColorMaps.tsx";
 import Konva from "konva";
-import React from "react";
 
 function lerpColor(c1: Color, c2: Color, t: number): Color {
     // Clamp t between 0 and 1
@@ -61,11 +60,15 @@ function App() {
 
     const [drawMode, setDrawMode] = useState<DrawMode>(DrawMode.None);
 
-    const [refInfo, setRefInfo] = useState<ReferenceData[]>([]);
-    const [tempRef, setTempRef] = useState<ReferenceData | null>(null)
+
+    const [refsData, setRefsData] = useState<ReferenceData[]>([]);
+    const [tempRef, setTempRef] = useState<ReferenceData | null>(null);
+    const prevRefCoords = useRef<{ x: number; y: number }[]>(refsData.map(({x, y}) => ({x, y})));
+
 
     const [samplesData, setSamplesData] = useState<SampleData[]>([]);
     const [tempSample, setTempSample] = useState<SampleData | null>(null);
+    const prevSampleCoords = useRef<{ x: number; y: number }[]>(samplesData.map(({x, y}) => ({x, y})));
 
     const [calibrationCurve, setCalibrationCurve] = useState<CalibrationData | null>(null)
 
@@ -100,13 +103,16 @@ function App() {
     }
 
     useEffect(() => {
-        const curve = calculateRegression(refInfo.filter(r => r.avgCounts && r.loading).map(r => ({
+        const curve = calculateRegression(refsData.filter(r => r.avgCounts && r.loading).map(r => ({
             x: r.avgCounts!,
             y: r.loading!
         })))
 
-        setCalibrationCurve(curve);
-    }, [refInfo]);
+        if (curve !== calibrationCurve) {
+            setCalibrationCurve(curve);
+        }
+
+    }, [refsData]);
 
     useEffect(() => {
         if (!map) return;
@@ -155,70 +161,98 @@ function App() {
         image.src = canvas.toDataURL();
     }, [map]);
 
-    const refAvgDeps = useMemo(
-        () =>
-            refInfo.map(r => ({
-                x: r.x,
-                y: r.y,
-            })),
-        [refInfo]
-    );
-
-    const sampleAvgDeps = useMemo(() => samplesData.map(info => ({
-        x: info.x,
-         y: info.y,
-         width: info.width  ,
-         height: info.height
-    })), [samplesData])
-
     useEffect(() => {
         if (!map) return;
 
-        let newSampleInfo = samplesData.map(sample => {
-            let sum = 0;
+        const sampleUpdates = new Map<number, number>();
+        const refUpdates = new Map<number, number>();
 
-            for (let y = 0; y < sample.height; y++) {
-                for (let x = 0; x < sample.width; x++) {
-                    sum += map[y + sample.y][x + sample.x];
-                }
+        samplesData.forEach((sample, idx) => {
+            let prev;
+            if (prevSampleCoords.current.length < idx) {
+                prev = prevSampleCoords.current[idx];
             }
 
-            const countAvg = sum / (sample.width * sample.height);
-            return {...sample, avgCounts: countAvg};
-        })
 
-        let newRefInfo = refInfo.map(circle => {
+            if (prev === undefined || sample.x !== prev.x || sample.y !== prev.y) {
+                let sum = 0;
 
-            if (circle.loading === null) return circle;
-
-            const mask = circularMask([width, height], circle.x, circle.y, circle.r);
-            let sum = 0;
-            let count = 0;
-
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    if (mask[y][x]) {
-                        sum += map[y][x];
-                        count++;
+                for (let y = 0; y < sample.height; y++) {
+                    for (let x = 0; x < sample.width; x++) {
+                        sum += map[y + sample.y][x + sample.x];
                     }
                 }
+
+                const countAvg = sum / (sample.width * sample.height);
+                sampleUpdates.set(idx, countAvg);
+            }
+        });
+
+        refsData.forEach((circle, idx) => {
+            let prev;
+            if (prevRefCoords.current.length < idx) {
+                prev = prevRefCoords.current[idx];
             }
 
-            const countAvg = count > 0 ? (sum / count) : null;
-            return {...circle, avgCounts: countAvg};
-        })
 
-        if (newRefInfo.some((v, idx) => v != refInfo[idx])) {
-            setRefInfo(newRefInfo);
+            if (prev === undefined || circle.x !== prev.x || circle.y !== prev.y) {
+                const mask = circularMask([width, height], circle.x, circle.y, circle.r);
+                let sum = 0;
+                let count = 0;
+
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        if (mask[y][x]) {
+                            sum += map[y][x];
+                            count++;
+                        }
+                    }
+                }
+
+                const countAvg = count > 0 ? (sum / count) : -1;
+                refUpdates.set(idx, countAvg);
+            }
+        });
+
+        if (sampleUpdates.size !== 0) {
+            let shouldUpdate = false;
+            const copy = [...samplesData];
+
+            sampleUpdates.forEach((counts, idx) => {
+                if (copy[idx].avgCounts !== counts) {
+                    copy[idx].avgCounts = counts;
+                    shouldUpdate = true;
+                }
+            });
+
+            if (shouldUpdate) {
+                setSamplesData(copy);
+                prevSampleCoords.current = copy.map(({x, y}) => ({x, y}));
+            }
         }
 
-        if (newSampleInfo.some((v, idx) => v != samplesData[idx])) {
-            setSamplesData(newSampleInfo);
+        if (refUpdates.size !== 0) {
+            let shouldUpdate = false;
+            const copy = [...refsData];
+
+            refUpdates.forEach((counts, idx) => {
+                if (copy[idx].avgCounts !== counts) {
+                    copy[idx].avgCounts = counts;
+                    shouldUpdate = true;
+                }
+            });
+
+            if (shouldUpdate) {
+                setRefsData(copy);
+                prevSampleCoords.current = copy.map(({x, y}) => ({x, y}));
+            }
         }
-    }, [map, refAvgDeps, sampleAvgDeps]);
+
+    }, [refsData, samplesData]);
 
     useEffect(() => {
-        setRefInfo([])
+        setRefsData([])
+        setSamplesData([])
     }, [map]);
 
     const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -277,7 +311,7 @@ function App() {
 
     const onMouseUp = () => {
         if (drawMode === DrawMode.Reference && tempRef) {
-            setRefInfo([...refInfo, tempRef]);
+            setRefsData([...refsData, tempRef]);
             setTempRef(null);
             setDrawMode(DrawMode.None);
         } else if (drawMode === DrawMode.Sample && tempSample) {
@@ -305,7 +339,7 @@ function App() {
     }
 
     function onRefDrag(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setRefInfo(prev => {
+        setRefsData(prev => {
             const copy = [...prev]
             copy[idx] = {
                 ...copy[idx],
@@ -317,7 +351,7 @@ function App() {
     }
 
     function setLoading(value: number, idx: number) {
-        setRefInfo(prev => {
+        setRefsData(prev => {
             const copy = [...prev]
             copy[idx] = {
                 ...copy[idx],
@@ -347,143 +381,146 @@ function App() {
             <div className="container">
                 <main role="main" className="pb-3">
                     <div className="row">
-                        {map && (
-                            <>
-                                <div className="col-md-8">
-                                    <div className="card" style={{width: width + 'px'}}>
-                                        <Stage className="card-img" width={width} height={height} onMouseUp={onMouseUp}
-                                               onMouseMove={onMouseMove} onMouseDown={onMouseDown}>
-                                            <Layer>
-                                                {img && <KImage image={img}/>}
-                                                {tempSample && <Rect
-                                                    x={tempSample.x}
-                                                    y={tempSample.y}
-                                                    width={tempSample.width}
-                                                    height={tempSample.height}
-                                                    stroke="yellow"
-                                                    strokeWidth={2}
-                                                />}
-                                                {samplesData.map((sample, idx) => <div key={`sample-idx-${idx}`}>
-                                                        <Rect
-                                                            key={`sample-${idx}`}
-                                                            x={sample.x}
-                                                            y={sample.y}
-                                                            width={sample.width}
-                                                            height={sample.height}
-                                                            stroke="green"
-                                                            strokeWidth={2}
-                                                        />
-                                                        <Text
-                                                            key={`circle-idx-${idx}`}
-                                                            x={sample.x + 5}
-                                                            y={sample.y + 5}
-                                                            text={`${idx + 1}`}
-                                                            fontSize={14}
-                                                            fill="green"/>
-                                                    </div>
-                                                )}
-                                                {refInfo.map((circle, idx) => <React.Fragment key={idx}>
-                                                        <Circle
-                                                            key={`reference-${idx}`}
-                                                            x={circle.x}
-                                                            y={circle.y}
-                                                            radius={circle.r}
-                                                            stroke="red"
-                                                            strokeWidth={2}
-                                                            draggable
-                                                            onDragEnd={e => onRefDrag(e, idx)}/>
-                                                        {circle.loading !== null && (
-                                                            <>
-                                                                <Text
-                                                                    key={`circle-idx-${idx}`}
-                                                                    x={circle.x - circle.r - 3}
-                                                                    y={circle.y - circle.r - 3}
-                                                                    text={`${idx + 1}`}
-                                                                    fontSize={14}
-                                                                    fill="red"/>
-                                                            </>
-                                                        )}
-                                                    </React.Fragment>
-                                                )}
-                                                {tempRef &&
-                                                    <Circle x={tempRef.x} y={tempRef.y} radius={tempRef.r}
-                                                            stroke="yellow"
-                                                            strokeWidth={2}/>}
-                                            </Layer>
-                                        </Stage>
-                                        <div className="card-body">
-                                            <h5 className="card-title">Map Details</h5>
-                                            <p className="card-text">
-                                                Dimensions: {map[0].length}x{map.length}
-                                                <br/>
-                                                Calibration
-                                                Curve: {JSON.stringify(calibrationCurve)}
-                                            </p>
-                                            <div className="input-group">
-                                                <button
-                                                    className={"btn btn" + (drawMode === DrawMode.Reference ? "-outline" : "") + "-primary"}
-                                                    onClick={onDrawRefClicked}>Add Reference
-                                                </button>
-                                                <button
-                                                    className={"btn btn" + (drawMode === DrawMode.Sample ? "-outline" : "") + "-success"}
-                                                    onClick={onDrawSampleClicked}>Add Sample
-                                                </button>
-                                            </div>
+                        <div className="col">
+                            {map && (
+                                <div className="card" style={{width: width + 'px'}}>
+                                    <Stage className="card-img" width={width} height={height} onMouseUp={onMouseUp}
+                                           onMouseMove={onMouseMove} onMouseDown={onMouseDown}>
+                                        <Layer>
+                                            {img && <KImage image={img}/>}
+                                            {tempSample && <Rect
+                                                x={tempSample.x}
+                                                y={tempSample.y}
+                                                width={tempSample.width}
+                                                height={tempSample.height}
+                                                stroke="yellow"
+                                                strokeWidth={2}
+                                            />}
+                                            {samplesData.map((sample, idx) => <div key={`sample-idx-${idx}`}>
+                                                    <Rect
+                                                        key={`sample-${idx}`}
+                                                        x={sample.x}
+                                                        y={sample.y}
+                                                        width={sample.width}
+                                                        height={sample.height}
+                                                        stroke="green"
+                                                        strokeWidth={2}
+                                                    />
+                                                    <Text
+                                                        key={`circle-idx-${idx}`}
+                                                        x={sample.x + 5}
+                                                        y={sample.y + 5}
+                                                        text={`${idx + 1}`}
+                                                        fontSize={14}
+                                                        fill="green"/>
+                                                </div>
+                                            )}
+                                            {refsData.map((circle, idx) => <div key={idx}>
+                                                    <Circle
+                                                        key={`reference-${idx}`}
+                                                        x={circle.x}
+                                                        y={circle.y}
+                                                        radius={circle.r}
+                                                        stroke="red"
+                                                        strokeWidth={2}
+                                                        draggable
+                                                        onDragEnd={e => onRefDrag(e, idx)}/>
+                                                    {circle.loading !== null && (
+                                                        <>
+                                                            <Text
+                                                                key={`circle-idx-${idx}`}
+                                                                x={circle.x - circle.r - 3}
+                                                                y={circle.y - circle.r - 3}
+                                                                text={`${idx + 1}`}
+                                                                fontSize={14}
+                                                                fill="red"/>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {tempRef &&
+                                                <Circle x={tempRef.x} y={tempRef.y} radius={tempRef.r}
+                                                        stroke="yellow"
+                                                        strokeWidth={2}/>}
+                                        </Layer>
+                                    </Stage>
+                                    <div className="card-body">
+                                        <h5 className="card-title">Map Details</h5>
+                                        <p className="card-text">
+                                            Dimensions: {map[0].length}x{map.length}
+                                            <br/>
+                                            Calibration
+                                            Curve: {JSON.stringify(calibrationCurve)}
+                                        </p>
+                                        <div className="input-group">
+                                            <button
+                                                className={"btn btn" + (drawMode === DrawMode.Reference ? "-outline" : "") + "-primary"}
+                                                onClick={onDrawRefClicked}>Add Reference
+                                            </button>
+                                            <button
+                                                className={"btn btn" + (drawMode === DrawMode.Sample ? "-outline" : "") + "-success"}
+                                                onClick={onDrawSampleClicked}>Add Sample
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
-                                <div className="col-md-4">
-                                    {refInfo.map((refData, refIdx) => (
-                                            <div className="card mb-3" key={`ref-data-${refIdx}`}>
-                                                <div className="card-body">
-                                                    <h6 className="card-title">Reference {refIdx + 1}</h6>
-                                                    <p className="card-text">
-                                                        <strong>Position</strong>: ({refData.x}, {refData.y}) <br/>
-                                                        <strong>Radius:</strong> {refData.r.toFixed(2)} <br/>
-                                                        <strong>Loading:</strong> {refData.loading ? `${refData.loading} µg/cm²` : "No loading defined"}
-                                                        <br/>
-                                                        <strong>Avg
-                                                            Counts:</strong> {refData.avgCounts?.toFixed(2) ?? "not calculated"}
-                                                        <br/>
-                                                        <strong>Estimated
-                                                            Loading:</strong> {(calibrationCurve && refData.avgCounts) ? `${(calibrationCurve.slope * refData.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
-                                                    </p>
-                                                </div>
+                            )}
+                            <br/>
+                            <button className="btn btn-outline-primary" onClick={handleLoadMap}>Load Map</button>
+                        </div>
+                        {map && (
+                            <div className="col">
+                                {refsData.map((refData, refIdx) => (
+                                    <div className="card mb-3" key={`ref-data-${refIdx}`}>
+                                        <div className="card-body">
+                                            <h6 className="card-title">Reference {refIdx + 1}</h6>
+                                            <p className="card-text">
+                                                <strong>Position</strong>: ({refData.x}, {refData.y}) <br/>
+                                                <strong>Radius:</strong> {refData.r.toFixed(2)} <br/>
+                                                <strong>Loading:</strong> {refData.loading ? `${refData.loading} µg/cm²` : "No loading defined"}
+                                                <br/>
+                                                <strong>Avg
+                                                    Counts:</strong> {refData.avgCounts?.toFixed(2) ?? "not calculated"}
+                                                <br/>
+                                                <strong>Estimated
+                                                    Loading:</strong> {(calibrationCurve && refData.avgCounts) ? `${(calibrationCurve.slope * refData.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                                {samplesData.map((sample, idx) => (
+                                        <div className="card mb-3" key={`sample-data-${idx}`}>
+                                            <div className="card-body">
+                                                <h6 className="card-title">Sample {idx + 1}</h6>
+                                                <p className="card-text">
+                                                    <strong>Position</strong>: ({sample.x}, {sample.y}) <br/>
+                                                    <strong>Dimensions:</strong> {sample.width}x{sample.height}
+                                                    <br/>
+                                                    <strong>Avg
+                                                        Counts:</strong> {sample.avgCounts?.toFixed(2) ?? "not calculated"}<br/>
+                                                    <strong>Loading
+                                                        (Est):</strong> {(calibrationCurve && sample.avgCounts) ? `${(calibrationCurve.slope * sample.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
+                                                </p>
                                             </div>
-                                        )
-                                    )}
-                                    {samplesData.map((sample, idx) => (
-                                            <div className="card mb-3" key={`sample-data-${idx}`}>
-                                                <div className="card-body">
-                                                    <h6 className="card-title">Sample {idx + 1}</h6>
-                                                    <p className="card-text">
-                                                        <strong>Position</strong>: ({sample.x}, {sample.y}) <br/>
-                                                        <strong>Dimensions:</strong> {sample.width}x{sample.height} <br/>
-                                                        <strong>Avg
-                                                            Counts:</strong> {sample.avgCounts?.toFixed(2) ?? "not calculated"}<br/>
-                                                        <strong>Loading
-                                                            (Est):</strong> {(calibrationCurve && sample.avgCounts) ? `${(calibrationCurve.slope * sample.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        )
-                                    )}
-                                </div>
-                            </>
+                                        </div>
+                                    )
+                                )}
+                            </div>
                         )}
                     </div>
-                    <br/>
-                    <button className="btn btn-outline-primary" onClick={handleLoadMap}>Load Map</button>
                 </main>
             </div>
-            {refInfo.map((ref, idx) => {
-                    if (ref.loading === null) {
-                        return <LoadingDialog key={`loading-model-${idx}`} onSubmit={value => setLoading(value, idx)}/>
+            {
+                refsData.map((ref, idx) => {
+                        if (ref.loading === null) {
+                            return <LoadingDialog key={`loading-model-${idx}`} onSubmit={value => setLoading(value, idx)}/>
+                        }
                     }
-                }
-            )}
+                )
+            }
         </>
-    );
+    )
+
 }
 
 interface ReferenceData {
@@ -505,8 +542,12 @@ interface SampleData {
 
 interface CalibrationData {
     slope: number,
-    int: number,
-    r: number
+    int
+        :
+        number,
+    r
+        :
+        number
 }
 
 enum DrawMode {
@@ -523,7 +564,9 @@ function circularMask(dims: [number, number], x: number, y: number, r: number): 
 }
 
 
-function LoadingDialog({onSubmit}: {
+function LoadingDialog({
+                           onSubmit
+                       }: {
     onSubmit: (value: number) => void;
 }) {
     const [value, setValue] = useState('');
