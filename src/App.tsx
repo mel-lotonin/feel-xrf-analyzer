@@ -5,8 +5,10 @@ import "./App.css";
 
 import {Circle, Image as KImage, Layer, Rect, Stage, Text} from "react-konva";
 import './ColorMaps.tsx'
-import {Color, CoolMap} from "./ColorMaps.tsx";
+import {Color, MasoudMap} from "./ColorMaps.tsx";
 import Konva from "konva";
+
+// TODO: Cancel loading dialog
 
 function lerpColor(c1: Color, c2: Color, t: number): Color {
     // Clamp t between 0 and 1
@@ -77,6 +79,7 @@ function App() {
 
     const width = map ? map[0].length : 0;
     const height = map ? map.length : 0;
+    const cellSize = 2;
 
     async function handleLoadMap() {
         try {
@@ -111,15 +114,15 @@ function App() {
         Draw Heatmap
         ================================================== */
         const canvas = canvasRef.current;
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = width * 2;
+        canvas.height = height * 2;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
             console.error("Failed to initialize canvas context");
             return
         }
 
-        const imageData = ctx.createImageData(width, height);
+        const imageData = ctx.createImageData(width * cellSize, height * cellSize);
         let maxValue = -Infinity;
         let minValue = Infinity;
 
@@ -130,13 +133,13 @@ function App() {
             }
         }
 
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const val = map[y][x];
+        for (let y = 0; y < height * cellSize; y++) {
+            for (let x = 0; x < width * cellSize; x++) {
+                const val = map[Math.floor(y / cellSize)][Math.floor(x / cellSize)];
                 const ratio = (val - minValue) / (maxValue - minValue);
-                const index = (y * width + x) * 4;
+                const index = (y * width * cellSize + x) * 4;
 
-                const color = gradientLerp(CoolMap, ratio)
+                const color = gradientLerp(MasoudMap, ratio)
 
                 imageData.data[index] = color.r;     // R
                 imageData.data[index + 1] = color.g;     // G
@@ -163,13 +166,13 @@ function App() {
             if (sample.x !== prev.x || sample.y !== prev.y) {
                 let sum = 0;
 
-                for (let y = 0; y < sample.height; y++) {
-                    for (let x = 0; x < sample.width; x++) {
+                for (let y = 0; y < Math.abs(sample.height); y++) {
+                    for (let x = 0; x < Math.abs(sample.width); x++) {
                         sum += map[y + Math.round(sample.y)][x + Math.round(sample.x)];
                     }
                 }
 
-                const countAvg = sum / (sample.width * sample.height);
+                const countAvg = sum / Math.abs(sample.width * sample.height);
                 sampleUpdates.set(idx, countAvg);
             }
         });
@@ -236,14 +239,14 @@ function App() {
             setTempRef({
                 avgCounts: null,
                 loading: null,
-                x: pos.x,
-                y: pos.y,
+                x: Math.floor(pos.x / cellSize),
+                y: Math.floor(pos.y / cellSize),
                 r: 1
             });
         } else if (drawMode === DrawMode.Sample) {
             setTempSample({
-                x: pos.x,
-                y: pos.y,
+                x: Math.floor(pos.x / cellSize),
+                y: Math.floor(pos.y / cellSize),
                 width: 1,
                 height: 1,
                 avgCounts: null
@@ -258,25 +261,22 @@ function App() {
         if (!pos) return;
 
         if (drawMode === DrawMode.Reference && tempRef) {
-            const dx = pos.x - tempRef.x;
-            const dy = pos.y - tempRef.y;
+            const dx = pos.x - tempRef.x * cellSize;
+            const dy = pos.y - tempRef.y * cellSize;
             const radius = Math.sqrt(dx * dx + dy * dy);
 
             setTempRef({
-                avgCounts: null,
-                loading: null,
-                x: tempRef.x,
-                y: tempRef.y,
-                r: radius
+                ...tempRef,
+                r: Math.floor(radius / cellSize),
             });
         } else if (drawMode === DrawMode.Sample && tempSample) {
-            const dx = pos.x - tempSample.x;
-            const dy = pos.y - tempSample.y;
+            const dx = pos.x - tempSample.x * cellSize;
+            const dy = pos.y - tempSample.y * cellSize;
 
             setTempSample(prev => ({
                 ...prev!,
-                width: dx,
-                height: dy
+                width: Math.floor(dx / cellSize),
+                height: Math.floor(dy / cellSize)
             }));
         }
     };
@@ -318,11 +318,11 @@ function App() {
             const copy = [...prev]
             copy[idx] = {
                 ...copy[idx],
-                x: e.target.x(),
-                y: e.target.y()
+                x: Math.floor(e.target.x() / cellSize),
+                y: Math.floor(e.target.y() / cellSize),
             }
             return copy;
-        })
+        });
     }
 
     function setLoading(value: number, idx: number) {
@@ -335,6 +335,81 @@ function App() {
             return copy;
         })
     }
+
+    function onRefDragStart(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
+        setRefsData(prev => {
+            const copy = [...prev]
+            copy[idx] = {
+                ...copy[idx],
+                x: Math.floor(e.target.x() / cellSize),
+                y: Math.floor(e.target.y() / cellSize),
+            }
+            return copy;
+        });
+    }
+
+    function onRefDragMove(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
+        setRefsData(prev => {
+            const copy = [...prev]
+            copy[idx] = {
+                ...copy[idx],
+                x: Math.floor(e.target.x() / cellSize),
+                y: Math.floor(e.target.y() / cellSize),
+            }
+            return copy;
+        });
+    }
+
+    function onSampleDragMove(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
+        setSamplesData(prev => {
+            const copy = [...prev]
+            copy[idx] = {
+                ...copy[idx],
+                x: Math.floor(e.target.x() / cellSize),
+                y: Math.floor(e.target.y() / cellSize),
+            }
+            return copy;
+        });
+    }
+
+    function onSampleDragStart(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
+        setSamplesData(prev => {
+            const copy = [...prev]
+            copy[idx] = {
+                ...copy[idx],
+                x: Math.floor(e.target.x() / cellSize),
+                y: Math.floor(e.target.y() / cellSize),
+            }
+            return copy;
+        });
+    }
+
+    function onSampleDragEnd(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
+        setSamplesData(prev => {
+            const copy = [...prev]
+            copy[idx] = {
+                ...copy[idx],
+                x: Math.floor(e.target.x() / cellSize),
+                y: Math.floor(e.target.y() / cellSize),
+            }
+            return copy;
+        });
+    }
+
+    function deleteRef(idx: number) {
+        const copy = [...refsData]
+        copy.splice(idx, 1)
+        prevRefCoords.current = copy.map(({x, y}) => ({x, y}))
+        setRefsData(copy)
+    }
+
+    function deleteSample(idx: number) {
+        const copy = [...samplesData]
+        copy.splice(idx, 1)
+        prevSampleCoords.current = copy.map(({x, y}) => ({x, y}))
+        setSamplesData(copy)
+    }
+
 
     return (
         <>
@@ -358,33 +433,38 @@ function App() {
                     <div className="row">
                         <div className="col">
                             {map && (
-                                <div className="card" style={{width: width + 'px'}}>
-                                    <Stage className="card-img" width={width} height={height} onMouseUp={onMouseUp}
+                                <div className="card" style={{width: width * cellSize + 'px'}}>
+                                    <Stage className="card-img" width={width * cellSize} height={height * cellSize}
+                                           onMouseUp={onMouseUp}
                                            onMouseMove={onMouseMove} onMouseDown={onMouseDown}>
                                         <Layer>
                                             {img && <KImage image={img}/>}
                                             {tempSample && <Rect
-                                                x={tempSample.x}
-                                                y={tempSample.y}
-                                                width={tempSample.width}
-                                                height={tempSample.height}
+                                                x={tempSample.x * cellSize}
+                                                y={tempSample.y * cellSize}
+                                                width={tempSample.width * cellSize}
+                                                height={tempSample.height * cellSize}
                                                 stroke="yellow"
                                                 strokeWidth={2}
                                             />}
                                             {samplesData.map((sample, idx) => <div key={`sample-idx-${idx}`}>
                                                     <Rect
                                                         key={`sample-${idx}`}
-                                                        x={sample.x}
-                                                        y={sample.y}
-                                                        width={sample.width}
-                                                        height={sample.height}
+                                                        x={sample.x * cellSize}
+                                                        y={sample.y * cellSize}
+                                                        width={sample.width * cellSize}
+                                                        height={sample.height * cellSize}
                                                         stroke="green"
                                                         strokeWidth={2}
+                                                        draggable
+                                                        onDragMove={e => onSampleDragMove(e, idx)}
+                                                        onDragStart={e => onSampleDragStart(e, idx)}
+                                                        onDragEnd={e => onSampleDragEnd(e, idx)}
                                                     />
                                                     <Text
                                                         key={`circle-idx-${idx}`}
-                                                        x={sample.x + 5}
-                                                        y={sample.y + 5}
+                                                        x={sample.x * cellSize + 5}
+                                                        y={sample.y * cellSize + 5}
                                                         text={`${idx + 1}`}
                                                         fontSize={14}
                                                         fill="green"/>
@@ -393,19 +473,22 @@ function App() {
                                             {refsData.map((circle, idx) => <div key={idx}>
                                                     <Circle
                                                         key={`reference-${idx}`}
-                                                        x={circle.x}
-                                                        y={circle.y}
-                                                        radius={circle.r}
+                                                        x={circle.x * cellSize}
+                                                        y={circle.y * cellSize}
+                                                        radius={circle.r * cellSize}
                                                         stroke="red"
                                                         strokeWidth={2}
                                                         draggable
-                                                        onDragEnd={e => onRefDrag(e, idx)}/>
+                                                        onDragMove={e => onRefDragMove(e, idx)}
+                                                        onDragStart={e => onRefDragStart(e, idx)}
+                                                        onDragEnd={e => onRefDrag(e, idx)}
+                                                    />
                                                     {circle.loading !== null && (
                                                         <>
                                                             <Text
                                                                 key={`circle-idx-${idx}`}
-                                                                x={circle.x - circle.r - 3}
-                                                                y={circle.y - circle.r - 3}
+                                                                x={circle.x * cellSize - circle.r - 3}
+                                                                y={circle.y * cellSize - circle.r - 3}
                                                                 text={`${idx + 1}`}
                                                                 fontSize={14}
                                                                 fill="red"/>
@@ -414,7 +497,8 @@ function App() {
                                                 </div>
                                             )}
                                             {tempRef &&
-                                                <Circle x={tempRef.x} y={tempRef.y} radius={tempRef.r}
+                                                <Circle x={tempRef.x * cellSize} y={tempRef.y * cellSize}
+                                                        radius={tempRef.r * cellSize}
                                                         stroke="yellow"
                                                         strokeWidth={2}/>}
                                         </Layer>
@@ -424,8 +508,11 @@ function App() {
                                         <p className="card-text">
                                             Dimensions: {map[0].length}x{map.length}
                                             <br/>
-                                            Calibration
-                                            Curve: {JSON.stringify(calibrationCurve)}
+                                            <strong>Slope:</strong> {calibrationCurve?.slope ?? ">=2 references needed"}
+                                            <br/>
+                                            <strong>Y-intercept:</strong> {calibrationCurve?.int ?? '>=2 references needed'}
+                                            <br/>
+                                            <strong>r:</strong> {calibrationCurve?.r ?? ">=2 references needed"}
                                         </p>
                                         <div className="input-group">
                                             <button
@@ -445,10 +532,10 @@ function App() {
                         </div>
                         {map && (
                             <div className="col">
-                                {refsData.map((refData, refIdx) => (
-                                    <div className="card mb-3" key={`ref-data-${refIdx}`}>
+                                {refsData.map((refData, idx) => (
+                                    <div className="card mb-3" key={`ref-data-${idx}`}>
                                         <div className="card-body">
-                                            <h6 className="card-title">Reference {refIdx + 1}</h6>
+                                            <h6 className="card-title">Reference {idx + 1}</h6>
                                             <p className="card-text">
                                                 <strong>Position</strong>: ({refData.x}, {refData.y}) <br/>
                                                 <strong>Radius:</strong> {refData.r.toFixed(2)} <br/>
@@ -459,6 +546,10 @@ function App() {
                                                 <br/>
                                                 <strong>Estimated
                                                     Loading:</strong> {(calibrationCurve && refData.avgCounts) ? `${(calibrationCurve.slope * refData.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
+                                                <br/>
+                                                <button className="btn btn-danger"
+                                                        onClick={() => deleteRef(idx)}>Delete
+                                                </button>
                                             </p>
                                         </div>
                                     </div>
@@ -475,6 +566,10 @@ function App() {
                                                         Counts:</strong> {sample.avgCounts?.toFixed(2) ?? "not calculated"}<br/>
                                                     <strong>Loading
                                                         (Est):</strong> {(calibrationCurve && sample.avgCounts) ? `${(calibrationCurve.slope * sample.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
+                                                    <br/>
+                                                    <button className="btn btn-danger"
+                                                            onClick={() => deleteSample(idx)}>Delete
+                                                    </button>
                                                 </p>
                                             </div>
                                         </div>

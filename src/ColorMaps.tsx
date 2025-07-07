@@ -5,6 +5,11 @@ export interface Color {
     a: number;
 }
 
+export const MasoudMap: Color[] = [
+    {r: 255, g: 255, b: 255, a: 255},
+    {r: 0, g: 0, b: 0, a: 255},
+]
+
 export const InfernoMap: Color[] = [
     {r: 0, g: 0, b: 4, a: 255},
     {r: 12, g: 8, b: 38, a: 255},
