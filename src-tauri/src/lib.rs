@@ -1,8 +1,6 @@
-use tauri::AppHandle;
-
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
-fn load_map(app: AppHandle, path: &str) -> Result<Vec<Vec<f32>>, String> {
+fn load_map(path: &str) -> Result<Vec<Vec<f32>>, String> {
     let mut csv = csv::ReaderBuilder::new()
         .delimiter(b';')
         .has_headers(false)

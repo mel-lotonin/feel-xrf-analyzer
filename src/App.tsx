@@ -3,12 +3,19 @@ import {invoke} from "@tauri-apps/api/core";
 import {open} from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
-import {Circle, Image as KImage, Layer, Rect, Stage, Text} from "react-konva";
+import {Circle, Image as KImage, Layer, Rect, Stage, Text, Group} from "react-konva";
 import './ColorMaps.tsx'
 import {Color, MasoudMap} from "./ColorMaps.tsx";
 import Konva from "konva";
+import RefCard, {RefData} from "./RefCard.tsx";
+import SampleCard, {SampleData} from "./SampleCard.tsx";
 
-// TODO: Cancel loading dialog
+
+export interface CalibrationCurve {
+    slope: number,
+    int: number,
+    r: number
+}
 
 function lerpColor(c1: Color, c2: Color, t: number): Color {
     // Clamp t between 0 and 1
@@ -37,9 +44,9 @@ function gradientLerp(colors: Color[], t: number): Color {
     return lerpColor(c1, c2, localT);
 }
 
-function calculateRegression(points: { x: number, y: number }[]): CalibrationData | null {
+function calculateRegression(points: { x: number, y: number }[]): CalibrationCurve | undefined {
     const n = points.length;
-    if (n < 2) return null;
+    if (n < 2) return undefined;
 
     const sumX = points.reduce((acc, p) => acc + p.x, 0);
     const sumY = points.reduce((acc, p) => acc + p.y, 0);
@@ -62,18 +69,14 @@ function App() {
 
     const [drawMode, setDrawMode] = useState<DrawMode>(DrawMode.None);
 
-
-    const [refsData, setRefsData] = useState<ReferenceData[]>([]);
-    const [tempRef, setTempRef] = useState<ReferenceData | null>(null);
-    const prevRefCoords = useRef<{ x: number; y: number }[]>(refsData.map(({x, y}) => ({x, y})));
-
+    const [refsData, setRefsData] = useState<RefData[]>([]);
+    const [tempRef, setTempRef] = useState<RefData | null>(null);
 
     const [samplesData, setSamplesData] = useState<SampleData[]>([]);
     const [tempSample, setTempSample] = useState<SampleData | null>(null);
-    const prevSampleCoords = useRef<{ x: number; y: number }[]>(samplesData.map(({x, y}) => ({x, y})));
 
-    const calibrationCurve = calculateRegression(refsData.filter(r => r.avgCounts && r.loading).map(r => ({
-        x: r.avgCounts!,
+    const calibrationCurve = calculateRegression(refsData.filter(r => r.loading).map(r => ({
+        x: r.avgCounts(map!),
         y: r.loading!
     })));
 
@@ -156,77 +159,6 @@ function App() {
     }, [map]);
 
     useEffect(() => {
-        if (!map) return;
-
-        const sampleUpdates = new Map<number, number>();
-        const refUpdates = new Map<number, number>();
-
-        samplesData.forEach((sample, idx) => {
-            const prev = prevSampleCoords.current[idx];
-            if (sample.x !== prev.x || sample.y !== prev.y) {
-                let sum = 0;
-
-                for (let y = 0; y < Math.abs(sample.height); y++) {
-                    for (let x = 0; x < Math.abs(sample.width); x++) {
-                        sum += map[y + Math.round(sample.y)][x + Math.round(sample.x)];
-                    }
-                }
-
-                const countAvg = sum / Math.abs(sample.width * sample.height);
-                sampleUpdates.set(idx, countAvg);
-            }
-        });
-
-        refsData.forEach((circle, idx) => {
-            const prev = prevRefCoords.current[idx];
-
-
-            if (circle.x !== prev.x || circle.y !== prev.y) {
-                const mask = circularMask([width, height], circle.x, circle.y, circle.r);
-                let sum = 0;
-                let count = 0;
-
-                for (let y = 0; y < height; y++) {
-                    for (let x = 0; x < width; x++) {
-                        if (mask[y][x]) {
-                            sum += map[y][x];
-                            count++;
-                        }
-                    }
-                }
-
-                const countAvg = count > 0 ? (sum / count) : -1;
-                refUpdates.set(idx, countAvg);
-            }
-        });
-
-        if (sampleUpdates.size !== 0) {
-            const copy = [...samplesData];
-
-            sampleUpdates.forEach((counts, idx) => {
-                if (copy[idx].avgCounts !== counts) {
-                    copy[idx].avgCounts = counts;
-                }
-            });
-
-            setSamplesData(copy);
-        }
-
-        if (refUpdates.size !== 0) {
-            const copy = [...refsData];
-
-            refUpdates.forEach((counts, idx) => {
-                if (copy[idx].avgCounts !== counts) {
-                    copy[idx].avgCounts = counts;
-                }
-            });
-
-            setRefsData(copy);
-        }
-
-    }, [refsData, samplesData]);
-
-    useEffect(() => {
         setRefsData([])
         setSamplesData([])
     }, [map]);
@@ -236,21 +168,18 @@ function App() {
         if (!pos) return;
 
         if (drawMode === DrawMode.Reference) {
-            setTempRef({
-                avgCounts: null,
-                loading: null,
-                x: Math.floor(pos.x / cellSize),
-                y: Math.floor(pos.y / cellSize),
-                r: 1
-            });
+            setTempRef(new RefData(
+                Math.floor(pos.x / cellSize),
+                Math.floor(pos.y / cellSize),
+                1
+            ));
         } else if (drawMode === DrawMode.Sample) {
-            setTempSample({
-                x: Math.floor(pos.x / cellSize),
-                y: Math.floor(pos.y / cellSize),
-                width: 1,
-                height: 1,
-                avgCounts: null
-            });
+            setTempSample(new SampleData(
+                Math.floor(pos.x / cellSize),
+                Math.floor(pos.y / cellSize),
+                1,
+                1,
+            ));
         }
     };
 
@@ -265,33 +194,43 @@ function App() {
             const dy = pos.y - tempRef.y * cellSize;
             const radius = Math.sqrt(dx * dx + dy * dy);
 
-            setTempRef({
-                ...tempRef,
-                r: Math.floor(radius / cellSize),
-            });
+            setTempRef(prev => (new RefData(prev!.x, prev!.y, Math.floor(radius / cellSize))));
         } else if (drawMode === DrawMode.Sample && tempSample) {
             const dx = pos.x - tempSample.x * cellSize;
             const dy = pos.y - tempSample.y * cellSize;
 
-            setTempSample(prev => ({
-                ...prev!,
-                width: Math.floor(dx / cellSize),
-                height: Math.floor(dy / cellSize)
-            }));
+            setTempSample(prev => (new SampleData(prev!.x, prev!.y, Math.floor(dx / cellSize), Math.floor(dy / cellSize))));
         }
     };
 
     const onMouseUp = () => {
         if (drawMode === DrawMode.Reference && tempRef) {
-            prevRefCoords.current = [...refsData, {x: -1, y: -1}].map(({x, y}) => ({x, y}));
-            setRefsData([...refsData, tempRef]);
-
-            setTempRef(null);
+            setTempRef(prev => {
+                const copy = prev!;
+                copy.loading = -1;
+                return copy
+            });
             setDrawMode(DrawMode.None);
         } else if (drawMode === DrawMode.Sample && tempSample) {
-            prevSampleCoords.current = [...samplesData, {x: -1, y: -1}].map(({x, y}) => ({x, y}));
-            setSamplesData([...samplesData, tempSample]);
-            setTempSample(null);
+            let x = tempSample.x;
+            let y = tempSample.y;
+            let width = tempSample.width;
+            let height = tempSample.height;
+
+            if (width < 0) {
+                x += width;
+                width = Math.abs(width);
+            }
+
+            if (height < 0) {
+                y += height;
+                height = Math.abs(height);
+            }
+
+            setSamplesData((prev => ([...prev, new SampleData(
+                x, y, width, height
+            )])));
+            setTempSample(null)
             setDrawMode(DrawMode.None);
         }
     };
@@ -313,37 +252,30 @@ function App() {
         }
     }
 
-    function onRefDrag(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
+    function setLoading(value: number) {
         setRefsData(prev => {
-            const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                x: Math.floor(e.target.x() / cellSize),
-                y: Math.floor(e.target.y() / cellSize),
-            }
-            return copy;
+            const copy = tempRef!;
+            copy.loading = value;
+
+            return [...prev, copy]
         });
+        setTempRef(null);
     }
 
-    function setLoading(value: number, idx: number) {
+    function onRefDragEnd(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
         setRefsData(prev => {
             const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                loading: value,
-            }
+            copy[idx].x = Math.floor(e.target.x() / cellSize);
+            copy[idx].y = Math.floor(e.target.y() / cellSize);
             return copy;
-        })
+        });
     }
 
     function onRefDragStart(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
         setRefsData(prev => {
             const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                x: Math.floor(e.target.x() / cellSize),
-                y: Math.floor(e.target.y() / cellSize),
-            }
+            copy[idx].x = Math.floor(e.target.x() / cellSize);
+            copy[idx].y = Math.floor(e.target.y() / cellSize);
             return copy;
         });
     }
@@ -351,11 +283,9 @@ function App() {
     function onRefDragMove(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
         setRefsData(prev => {
             const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                x: Math.floor(e.target.x() / cellSize),
-                y: Math.floor(e.target.y() / cellSize),
-            }
+            copy[idx].x = Math.floor(e.target.x() / cellSize);
+            copy[idx].y = Math.floor(e.target.y() / cellSize);
+
             return copy;
         });
     }
@@ -363,11 +293,9 @@ function App() {
     function onSampleDragMove(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
         setSamplesData(prev => {
             const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                x: Math.floor(e.target.x() / cellSize),
-                y: Math.floor(e.target.y() / cellSize),
-            }
+            copy[idx].x = Math.floor(e.target.x() / cellSize);
+            copy[idx].y = Math.floor(e.target.y() / cellSize);
+
             return copy;
         });
     }
@@ -375,11 +303,9 @@ function App() {
     function onSampleDragStart(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
         setSamplesData(prev => {
             const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                x: Math.floor(e.target.x() / cellSize),
-                y: Math.floor(e.target.y() / cellSize),
-            }
+            copy[idx].x = Math.floor(e.target.x() / cellSize);
+            copy[idx].y = Math.floor(e.target.y() / cellSize);
+
             return copy;
         });
     }
@@ -387,11 +313,9 @@ function App() {
     function onSampleDragEnd(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
         setSamplesData(prev => {
             const copy = [...prev]
-            copy[idx] = {
-                ...copy[idx],
-                x: Math.floor(e.target.x() / cellSize),
-                y: Math.floor(e.target.y() / cellSize),
-            }
+            copy[idx].x = Math.floor(e.target.x() / cellSize);
+            copy[idx].y = Math.floor(e.target.y() / cellSize);
+
             return copy;
         });
     }
@@ -399,17 +323,14 @@ function App() {
     function deleteRef(idx: number) {
         const copy = [...refsData]
         copy.splice(idx, 1)
-        prevRefCoords.current = copy.map(({x, y}) => ({x, y}))
         setRefsData(copy)
     }
 
     function deleteSample(idx: number) {
         const copy = [...samplesData]
         copy.splice(idx, 1)
-        prevSampleCoords.current = copy.map(({x, y}) => ({x, y}))
         setSamplesData(copy)
     }
-
 
     return (
         <>
@@ -447,7 +368,7 @@ function App() {
                                                 stroke="yellow"
                                                 strokeWidth={2}
                                             />}
-                                            {samplesData.map((sample, idx) => <div key={`sample-idx-${idx}`}>
+                                            {samplesData.map((sample, idx) =><Group key={`sample-group-${idx}`}>
                                                     <Rect
                                                         key={`sample-${idx}`}
                                                         x={sample.x * cellSize}
@@ -468,9 +389,9 @@ function App() {
                                                         text={`${idx + 1}`}
                                                         fontSize={14}
                                                         fill="green"/>
-                                                </div>
+                                                </Group>
                                             )}
-                                            {refsData.map((circle, idx) => <div key={idx}>
+                                            {refsData.map((circle, idx) => <Group key={`ref-group-${idx}`}>
                                                     <Circle
                                                         key={`reference-${idx}`}
                                                         x={circle.x * cellSize}
@@ -481,7 +402,7 @@ function App() {
                                                         draggable
                                                         onDragMove={e => onRefDragMove(e, idx)}
                                                         onDragStart={e => onRefDragStart(e, idx)}
-                                                        onDragEnd={e => onRefDrag(e, idx)}
+                                                        onDragEnd={e => onRefDragEnd(e, idx)}
                                                     />
                                                     {circle.loading !== null && (
                                                         <>
@@ -494,7 +415,7 @@ function App() {
                                                                 fill="red"/>
                                                         </>
                                                     )}
-                                                </div>
+                                                </Group>
                                             )}
                                             {tempRef &&
                                                 <Circle x={tempRef.x * cellSize} y={tempRef.y * cellSize}
@@ -533,46 +454,14 @@ function App() {
                         {map && (
                             <div className="col">
                                 {refsData.map((refData, idx) => (
-                                    <div className="card mb-3" key={`ref-data-${idx}`}>
-                                        <div className="card-body">
-                                            <h6 className="card-title">Reference {idx + 1}</h6>
-                                            <p className="card-text">
-                                                <strong>Position</strong>: ({refData.x}, {refData.y}) <br/>
-                                                <strong>Radius:</strong> {refData.r.toFixed(2)} <br/>
-                                                <strong>Loading:</strong> {refData.loading ? `${refData.loading} µg/cm²` : "No loading defined"}
-                                                <br/>
-                                                <strong>Avg
-                                                    Counts:</strong> {refData.avgCounts?.toFixed(2) ?? "not calculated"}
-                                                <br/>
-                                                <strong>Estimated
-                                                    Loading:</strong> {(calibrationCurve && refData.avgCounts) ? `${(calibrationCurve.slope * refData.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
-                                                <br/>
-                                                <button className="btn btn-danger"
-                                                        onClick={() => deleteRef(idx)}>Delete
-                                                </button>
-                                            </p>
-                                        </div>
-                                    </div>
+                                    <RefCard key={`refcard-${idx}`} index={idx} data={refData}
+                                             calibrationCurve={calibrationCurve} map={map}
+                                             onDelete={() => deleteRef(idx)}></RefCard>
                                 ))}
                                 {samplesData.map((sample, idx) => (
-                                        <div className="card mb-3" key={`sample-data-${idx}`}>
-                                            <div className="card-body">
-                                                <h6 className="card-title">Sample {idx + 1}</h6>
-                                                <p className="card-text">
-                                                    <strong>Position</strong>: ({sample.x}, {sample.y}) <br/>
-                                                    <strong>Dimensions:</strong> {sample.width}x{sample.height}
-                                                    <br/>
-                                                    <strong>Avg
-                                                        Counts:</strong> {sample.avgCounts?.toFixed(2) ?? "not calculated"}<br/>
-                                                    <strong>Loading
-                                                        (Est):</strong> {(calibrationCurve && sample.avgCounts) ? `${(calibrationCurve.slope * sample.avgCounts + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
-                                                    <br/>
-                                                    <button className="btn btn-danger"
-                                                            onClick={() => deleteSample(idx)}>Delete
-                                                    </button>
-                                                </p>
-                                            </div>
-                                        </div>
+                                        <SampleCard key={`samplecard-${idx}`} index={idx} data={sample}
+                                                    calibrationCurve={calibrationCurve} map={map}
+                                                    onDelete={() => deleteSample(idx)}/>
                                     )
                                 )}
                             </div>
@@ -580,39 +469,11 @@ function App() {
                     </div>
                 </main>
             </div>
-            {
-                refsData.map((ref, idx) => {
-                        if (ref.loading === null) {
-                            return <LoadingDialog key={`loading-model-${idx}`} onSubmit={value => setLoading(value, idx)}/>
-                        }
-                    }
-                )
-            }
+            {tempRef?.loading === -1 &&
+                <LoadingDialog onSubmit={value => setLoading(value)} onCancel={() => setTempRef(null)}/>}
         </>
     )
 
-}
-
-interface ReferenceData {
-    x: number;
-    y: number;
-    r: number;
-    loading: number | null;
-    avgCounts: number | null;
-}
-
-interface SampleData {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    avgCounts: number | null;
-}
-
-interface CalibrationData {
-    slope: number,
-    int: number,
-    r: number
 }
 
 enum DrawMode {
@@ -621,18 +482,13 @@ enum DrawMode {
     Sample
 }
 
-function circularMask(dims: [number, number], x: number, y: number, r: number): boolean[][] {
-    const [width, height] = dims;
-    return Array.from({length: height}, (_, y2) =>
-        Array.from({length: width}, (_, x2) => (x - x2) ** 2 + (y - y2) ** 2 <= r ** 2)
-    );
-}
-
 
 function LoadingDialog({
-                           onSubmit
+                           onSubmit,
+                           onCancel
                        }: {
     onSubmit: (value: number) => void;
+    onCancel: () => void
 }) {
     const [value, setValue] = useState('');
 
@@ -662,6 +518,7 @@ function LoadingDialog({
                         >
                             Confirm
                         </button>
+                        <button className="btn btn-secondary" onClick={() => onCancel()}>Cancel</button>
                     </div>
                 </div>
             </div>
