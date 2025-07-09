@@ -3,12 +3,12 @@ import {invoke} from "@tauri-apps/api/core";
 import {open} from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
-import {Circle, Image as KImage, Layer, Rect, Stage, Text, Group} from "react-konva";
+import {Image as KImage, Layer, Line, Stage} from "react-konva";
 import './ColorMaps.tsx'
 import {Color, MasoudMap} from "./ColorMaps.tsx";
 import Konva from "konva";
-import RefCard, {RefData} from "./RefCard.tsx";
-import SampleCard, {SampleData} from "./SampleCard.tsx";
+import RefCard, {RefCanvas, RefData, RefTempCanvas} from "./RefCard.tsx";
+import SampleCard, {SampleCanvas, SampleData, SampleTempCanvas} from "./SampleCard.tsx";
 
 
 export interface CalibrationCurve {
@@ -80,9 +80,13 @@ function App() {
         y: r.loading!
     })));
 
+    const [gridSize, setGridSize] = useState<number>(20);
+    const [gridStroke, setGridStroke] = useState<number>(0);
+
     const width = map ? map[0].length : 0;
     const height = map ? map.length : 0;
     const cellSize = 2;
+
 
     async function handleLoadMap() {
         try {
@@ -332,6 +336,14 @@ function App() {
         setSamplesData(copy)
     }
 
+    function rotateSample(idx: number, angle: number) {
+        setSamplesData(prev => {
+            const copy = [...prev];
+            copy[idx].rotation = angle;
+            return copy;
+        });
+    }
+
     return (
         <>
             <header>
@@ -360,73 +372,46 @@ function App() {
                                            onMouseMove={onMouseMove} onMouseDown={onMouseDown}>
                                         <Layer>
                                             {img && <KImage image={img}/>}
-                                            {tempSample && <Rect
-                                                x={tempSample.x * cellSize}
-                                                y={tempSample.y * cellSize}
-                                                width={tempSample.width * cellSize}
-                                                height={tempSample.height * cellSize}
-                                                stroke="yellow"
-                                                strokeWidth={2}
-                                            />}
-                                            {samplesData.map((sample, idx) =><Group key={`sample-group-${idx}`}>
-                                                    <Rect
-                                                        key={`sample-${idx}`}
-                                                        x={sample.x * cellSize}
-                                                        y={sample.y * cellSize}
-                                                        width={sample.width * cellSize}
-                                                        height={sample.height * cellSize}
-                                                        stroke="green"
-                                                        strokeWidth={2}
-                                                        draggable
-                                                        onDragMove={e => onSampleDragMove(e, idx)}
-                                                        onDragStart={e => onSampleDragStart(e, idx)}
-                                                        onDragEnd={e => onSampleDragEnd(e, idx)}
-                                                    />
-                                                    <Text
-                                                        key={`circle-idx-${idx}`}
-                                                        x={sample.x * cellSize + 5}
-                                                        y={sample.y * cellSize + 5}
-                                                        text={`${idx + 1}`}
-                                                        fontSize={14}
-                                                        fill="green"/>
-                                                </Group>
+                                            {tempSample && <SampleTempCanvas sample={tempSample} cellSize={cellSize}/>}
+                                            {samplesData.map((sample, idx) =>
+                                                <SampleCanvas key={`sample-${idx}`} idx={idx} sample={sample}
+                                                              cellSize={cellSize}
+                                                              onDragStart={(e) => onSampleDragStart(e, idx)}
+                                                              onDragMove={(e) => onSampleDragMove(e, idx)}
+                                                              onDragEnd={(e) => onSampleDragEnd(e, idx)}
+                                                />
                                             )}
-                                            {refsData.map((circle, idx) => <Group key={`ref-group-${idx}`}>
-                                                    <Circle
-                                                        key={`reference-${idx}`}
-                                                        x={circle.x * cellSize}
-                                                        y={circle.y * cellSize}
-                                                        radius={circle.r * cellSize}
-                                                        stroke="red"
-                                                        strokeWidth={2}
-                                                        draggable
-                                                        onDragMove={e => onRefDragMove(e, idx)}
-                                                        onDragStart={e => onRefDragStart(e, idx)}
-                                                        onDragEnd={e => onRefDragEnd(e, idx)}
-                                                    />
-                                                    {circle.loading !== null && (
-                                                        <>
-                                                            <Text
-                                                                key={`circle-idx-${idx}`}
-                                                                x={circle.x * cellSize - circle.r - 3}
-                                                                y={circle.y * cellSize - circle.r - 3}
-                                                                text={`${idx + 1}`}
-                                                                fontSize={14}
-                                                                fill="red"/>
-                                                        </>
-                                                    )}
-                                                </Group>
+                                            {refsData.map((circle, idx) =>
+                                                <RefCanvas key={`ref-${idx}`} idx={idx} data={circle}
+                                                           cellSize={cellSize}
+                                                           onDragStart={e => onRefDragStart(e, idx)}
+                                                           onDragMove={e => onRefDragMove(e, idx)}
+                                                           onDragEnd={e => onRefDragEnd(e, idx)}
+                                                />
                                             )}
-                                            {tempRef &&
-                                                <Circle x={tempRef.x * cellSize} y={tempRef.y * cellSize}
-                                                        radius={tempRef.r * cellSize}
-                                                        stroke="yellow"
-                                                        strokeWidth={2}/>}
+                                            {tempRef && <RefTempCanvas data={tempRef} cellSize={cellSize}/>}
+                                            {Array.from({length: width}).map((_, i) => (
+                                                <Line
+                                                    key={`v-${i}`}
+                                                    points={[i * gridSize, 0, i * gridSize, height * gridSize]}
+                                                    stroke="rgba(0,0,0,1)"
+                                                    strokeWidth={gridStroke}
+                                                />
+                                            ))}
+
+                                            {Array.from({length: height}).map((_, i) => (
+                                                <Line
+                                                    key={`h-${i}`}
+                                                    points={[0, i * gridSize, width * gridSize, i * gridSize]}
+                                                    stroke="rgba(0,0,0,1)"
+                                                    strokeWidth={gridStroke}
+                                                />
+                                            ))}
                                         </Layer>
                                     </Stage>
                                     <div className="card-body">
                                         <h5 className="card-title">Map Details</h5>
-                                        <p className="card-text">
+                                        <span className="card-text">
                                             Dimensions: {map[0].length}x{map.length}
                                             <br/>
                                             <strong>Slope:</strong> {calibrationCurve?.slope ?? ">=2 references needed"}
@@ -434,7 +419,7 @@ function App() {
                                             <strong>Y-intercept:</strong> {calibrationCurve?.int ?? '>=2 references needed'}
                                             <br/>
                                             <strong>r:</strong> {calibrationCurve?.r ?? ">=2 references needed"}
-                                        </p>
+                                        </span>
                                         <div className="input-group">
                                             <button
                                                 className={"btn btn" + (drawMode === DrawMode.Reference ? "-outline" : "") + "-primary"}
@@ -449,7 +434,33 @@ function App() {
                                 </div>
                             )}
                             <br/>
-                            <button className="btn btn-outline-primary" onClick={handleLoadMap}>Load Map</button>
+                            <div className="card mb-3" style={{width: '600px'}}>
+                                <div className="card-body">
+                                    <h5 className="card-title">Settings</h5>
+
+                                    <div className="mb-3">
+                                        <button className="btn btn-outline-primary" onClick={handleLoadMap}>
+                                            Load Map
+                                        </button>
+                                    </div>
+
+                                    <div className="input-group">
+                                        <span className="input-group-text">Grid Size</span>
+                                        <input
+                                            type="number"
+                                            className="form-control"
+                                            value={gridSize}
+                                            onChange={(e) => setGridSize(Math.max(1, parseInt(e.target.value)))}
+                                            min={1}
+                                        />
+                                    </div>
+                                    <div className="input-group">
+                                        <span className="input-group-text">Grid Width</span>
+                                        <input type="number" className="form-control" value={gridStroke}
+                                               onChange={(e) => setGridStroke(Math.max(0, parseInt(e.target.value)))}/>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         {map && (
                             <div className="col">
@@ -461,7 +472,8 @@ function App() {
                                 {samplesData.map((sample, idx) => (
                                         <SampleCard key={`samplecard-${idx}`} index={idx} data={sample}
                                                     calibrationCurve={calibrationCurve} map={map}
-                                                    onDelete={() => deleteSample(idx)}/>
+                                                    onDelete={() => deleteSample(idx)}
+                                                    onRotate={(angle) => rotateSample(idx, angle)}/>
                                     )
                                 )}
                             </div>

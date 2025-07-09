@@ -1,4 +1,7 @@
 import {CalibrationCurve} from './App.tsx'
+import {Circle, Group, Text} from "react-konva";
+import Konva from "konva";
+import KonvaEventObject = Konva.KonvaEventObject;
 
 export class RefData {
     private _x: number;
@@ -92,7 +95,7 @@ function RefCard({index, data, map, calibrationCurve, onDelete}: RefCardProps) {
         <div className="card mb-3">
             <div className="card-body">
                 <h6 className="card-title">Reference {index + 1}</h6>
-                <p className="card-text">
+                <span className="card-text">
                     <strong>Position</strong>: ({data.x}, {data.y}) <br/>
                     <strong>Radius:</strong> {data.r.toFixed(2)} <br/>
                     <strong>Loading:</strong> {data.loading!} µg/cm²
@@ -106,9 +109,55 @@ function RefCard({index, data, map, calibrationCurve, onDelete}: RefCardProps) {
                     <button className="btn btn-danger"
                             onClick={() => onDelete?.()}>Delete
                     </button>
-                </p>
+                </span>
             </div>
         </div>)
+}
+
+interface RefTempCanvasProps {
+    data: RefData;
+    cellSize: number;
+}
+
+export function RefTempCanvas({data, cellSize}: RefTempCanvasProps) {
+    return (<Circle x={data.x * cellSize} y={data.y * cellSize}
+                    radius={data.r * cellSize}
+                    stroke="yellow"
+                    strokeWidth={2}/>);
+}
+
+interface RefCanvasProps {
+    idx: number;
+    data: RefData;
+    cellSize: number;
+    onDragStart: (e: KonvaEventObject<DragEvent>) => void;
+    onDragMove: (e: KonvaEventObject<DragEvent>) => void;
+    onDragEnd: (e: KonvaEventObject<DragEvent>) => void;
+}
+
+
+export function RefCanvas({idx, data, cellSize, onDragStart, onDragMove, onDragEnd}: RefCanvasProps) {
+    return (
+        <Group>
+            <Circle
+                x={data.x * cellSize}
+                y={data.y * cellSize}
+                radius={data.r * cellSize}
+                stroke="red"
+                strokeWidth={2}
+                draggable
+                onDragMove={onDragMove}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+            />
+            <Text
+                x={data.x * cellSize - data.r - 3}
+                y={data.y * cellSize - data.r - 3}
+                text={`${idx + 1}`}
+                fontSize={14}
+                fill="red"/>
+        </Group>
+    );
 }
 
 function circularMask(dims: [number, number], x: number, y: number, r: number): boolean[][] {
