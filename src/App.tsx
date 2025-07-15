@@ -390,7 +390,7 @@ function App() {
                         {map && (
                             <div className="col">
                                 {samples.map((sample, idx) => (
-                                    <SampleInfoCard key={`sample-card-${idx}`} index={idx} data={sample} calibrationCurve={calibrationCurve} map={map} />
+                                    <SampleInfoCard key={`sample-card-${idx}`} index={idx} data={sample} calibrationCurve={calibrationCurve} map={map} onUpdate={value => onSampleUpdate(idx, value)} />
                                 ))}
                             </div>
                         )}

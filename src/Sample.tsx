@@ -210,6 +210,15 @@ export function SampleInfoCard({index, data, map, calibrationCurve, onDelete, on
                            readOnly/>
                 </div>
                 <br/>
+                    <div className="btn-group-toggle" data-toggle="buttons">
+                        <label className="btn btn-secondary active">
+                        <input type="checkbox"
+                               checked={data.type == SampleType.Reference}
+                               onChange={e => onUpdate?.(new Sample(data.x, data.y, data.w, data.h, data.r, data.loading, e.target.checked ? SampleType.Reference : SampleType.Unknown, data.shape, data.a))}
+                        />
+                            {data.type == SampleType.Reference ? "Make Unknown" : "Make Reference"}
+                        </label>
+                    </div>
                 <button className="btn btn-danger"
                         onClick={() => onDelete?.()}>Delete
                 </button>
