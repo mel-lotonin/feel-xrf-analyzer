@@ -189,30 +189,30 @@ interface SampleCanvasProps {
 }
 
 
-export function SampleCanvas({idx, sample, cellSize, onDragStart, onDragMove, onDragEnd}: SampleCanvasProps) {
-    return (
-        <Group>
-            <Rect
-                x={sample.x * cellSize}
-                y={sample.y * cellSize}
-                width={sample.width * cellSize}
-                height={sample.height * cellSize}
-                stroke="green"
-                strokeWidth={2}
-                draggable
-                onDragMove={onDragMove}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                rotation={sample.rotation}
-            />
-            <Text
-                x={sample.x * cellSize + 5}
-                y={sample.y * cellSize + 5}
-                text={`${idx + 1}`}
-                fontSize={14}
-                fill="green"/>
-        </Group>
-    );
-}
+// export function SampleCanvas({idx, sample, cellSize, onDragStart, onDragMove, onDragEnd}: SampleCanvasProps) {
+//     return (
+//         <Group>
+//             <Rect
+//                 x={sample.x * cellSize}
+//                 y={sample.y * cellSize}
+//                 width={sample.width * cellSize}
+//                 height={sample.height * cellSize}
+//                 stroke="green"
+//                 strokeWidth={2}
+//                 draggable
+//                 onDragMove={onDragMove}
+//                 onDragStart={onDragStart}
+//                 onDragEnd={onDragEnd}
+//                 rotation={sample.rotation}
+//             />
+//             <Text
+//                 x={sample.x * cellSize + 5}
+//                 y={sample.y * cellSize + 5}
+//                 text={`${idx + 1}`}
+//                 fontSize={14}
+//                 fill="green"/>
+//         </Group>
+//     );
+// }
 
 export default SampleCard;

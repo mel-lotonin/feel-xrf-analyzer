@@ -7,8 +7,8 @@ import {Image as KImage, Layer, Line, Stage} from "react-konva";
 import './ColorMaps.tsx'
 import {Color, MasoudMap} from "./ColorMaps.tsx";
 import Konva from "konva";
-import RefCard, {RefCanvas, RefData, RefTempCanvas} from "./RefCard.tsx";
-import SampleCard, {SampleCanvas, SampleData, SampleTempCanvas} from "./SampleCard.tsx";
+import {getCurrentWebviewWindow, WebviewWindow} from "@tauri-apps/api/webviewWindow";
+import {Sample, SampleInfoCard, SampleShape, SampleType, SampleCanvas} from "./Sample.tsx";
 
 
 export interface CalibrationCurve {
@@ -67,17 +67,16 @@ function App() {
     const [img, setImg] = useState<HTMLImageElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement>(document.createElement("canvas"));
 
-    const [drawMode, setDrawMode] = useState<DrawMode>(DrawMode.None);
+    const [drawMode, setDrawMode] = useState<SampleShape | null>(null);
 
-    const [refsData, setRefsData] = useState<RefData[]>([]);
-    const [tempRef, setTempRef] = useState<RefData | null>(null);
+    const [samples, setSamples] = useState<Sample[]>([]);
+    const [tempSample, setTempSample] = useState<Sample | null>(null);
 
-    const [samplesData, setSamplesData] = useState<SampleData[]>([]);
-    const [tempSample, setTempSample] = useState<SampleData | null>(null);
-
-    const calibrationCurve = calculateRegression(refsData.filter(r => r.loading).map(r => ({
-        x: r.avgCounts(map!),
-        y: r.loading!
+    const calibrationCurve = calculateRegression(samples
+        .filter(r => r.type === SampleType.Reference && r.loading !== null && r.counts(map!) !== null)
+        .map(r => ({
+            x: r.counts(map!)!,
+            y: r.loading!
     })));
 
     const [gridSize, setGridSize] = useState<number>(20);
@@ -163,63 +162,62 @@ function App() {
     }, [map]);
 
     useEffect(() => {
-        setRefsData([])
-        setSamplesData([])
+        setSamples([])
+        setTempSample(null)
     }, [map]);
 
     const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
         const pos = e.target.getStage()?.getPointerPosition();
         if (!pos) return;
 
-        if (drawMode === DrawMode.Reference) {
-            setTempRef(new RefData(
+        if (drawMode === SampleShape.Circle) {
+            setTempSample(Sample.createCircle(
                 Math.floor(pos.x / cellSize),
                 Math.floor(pos.y / cellSize),
                 1
             ));
-        } else if (drawMode === DrawMode.Sample) {
-            setTempSample(new SampleData(
+        } else if (drawMode === SampleShape.Rect) {
+            setTempSample(Sample.createRect(
                 Math.floor(pos.x / cellSize),
                 Math.floor(pos.y / cellSize),
                 1,
-                1,
+                1
             ));
         }
     };
 
     const onMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
-        if (drawMode === DrawMode.None) return;
+        if (drawMode === null) return;
 
         const pos = e.target.getStage()?.getPointerPosition();
         if (!pos) return;
 
-        if (drawMode === DrawMode.Reference && tempRef) {
-            const dx = pos.x - tempRef.x * cellSize;
-            const dy = pos.y - tempRef.y * cellSize;
+        if (drawMode === SampleShape.Circle && tempSample) {
+            const dx = pos.x - tempSample.x * cellSize;
+            const dy = pos.y - tempSample.y * cellSize;
             const radius = Math.sqrt(dx * dx + dy * dy);
 
-            setTempRef(prev => (new RefData(prev!.x, prev!.y, Math.floor(radius / cellSize))));
-        } else if (drawMode === DrawMode.Sample && tempSample) {
+            setTempSample(prev => (Sample.createCircle(prev!.x, prev!.y, Math.floor(radius / cellSize))));
+        } else if (drawMode === SampleShape.Rect && tempSample) {
             const dx = pos.x - tempSample.x * cellSize;
             const dy = pos.y - tempSample.y * cellSize;
 
-            setTempSample(prev => (new SampleData(prev!.x, prev!.y, Math.floor(dx / cellSize), Math.floor(dy / cellSize))));
+            setTempSample(prev => (Sample.createRect(prev!.x, prev!.y, Math.floor(dx / cellSize), Math.floor(dy / cellSize))));
         }
     };
 
     const onMouseUp = () => {
-        if (drawMode === DrawMode.Reference && tempRef) {
-            setTempRef(prev => {
-                const copy = prev!;
-                copy.loading = -1;
-                return copy
+        if (drawMode === SampleShape.Circle && tempSample) {
+            setSamples(prev => {
+                return [...prev, tempSample]
             });
-            setDrawMode(DrawMode.None);
-        } else if (drawMode === DrawMode.Sample && tempSample) {
+            setTempSample(null);
+            setDrawMode(null);
+        } else if (drawMode === SampleShape.Rect && tempSample) {
             let x = tempSample.x;
             let y = tempSample.y;
-            let width = tempSample.width;
-            let height = tempSample.height;
+            let width = tempSample.w!;
+            let height = tempSample.h!;
 
             if (width < 0) {
                 x += width;
@@ -231,117 +229,55 @@ function App() {
                 height = Math.abs(height);
             }
 
-            setSamplesData((prev => ([...prev, new SampleData(
+            setSamples((prev => ([...prev, Sample.createRect(
                 x, y, width, height
             )])));
             setTempSample(null)
-            setDrawMode(DrawMode.None);
+            setDrawMode(null);
         }
     };
 
 
-    function onDrawRefClicked() {
-        if (drawMode === DrawMode.Reference) {
-            setDrawMode(DrawMode.None);
+    function onDrawCircleClicked() {
+        if (drawMode === SampleShape.Circle) {
+            setDrawMode(null);
         } else {
-            setDrawMode(DrawMode.Reference);
+            setDrawMode(SampleShape.Circle);
         }
     }
 
-    function onDrawSampleClicked() {
-        if (drawMode === DrawMode.Sample) {
-            setDrawMode(DrawMode.None);
+    function onDrawRectClicked() {
+        if (drawMode === SampleShape.Rect) {
+            setDrawMode(null);
         } else {
-            setDrawMode(DrawMode.Sample);
+            setDrawMode(SampleShape.Rect);
         }
     }
 
-    function setLoading(value: number) {
-        setRefsData(prev => {
-            const copy = tempRef!;
-            copy.loading = value;
-
-            return [...prev, copy]
+    async function startAnalyze() {
+        const analyzeWindow = new WebviewWindow('analyzeWindow', {
+            url: '/autodetect.html',
+            title: 'Autodetect Objects',
+            parent: getCurrentWebviewWindow()
         });
-        setTempRef(null);
-    }
 
-    function onRefDragEnd(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setRefsData(prev => {
-            const copy = [...prev]
-            copy[idx].x = Math.floor(e.target.x() / cellSize);
-            copy[idx].y = Math.floor(e.target.y() / cellSize);
-            return copy;
+        analyzeWindow.once('tauri://error', function (e) {
+            console.error("Failed to create window", e);
         });
-    }
 
-    function onRefDragStart(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setRefsData(prev => {
-            const copy = [...prev]
-            copy[idx].x = Math.floor(e.target.x() / cellSize);
-            copy[idx].y = Math.floor(e.target.y() / cellSize);
-            return copy;
+        analyzeWindow.once('tauri://created', () => {
+            analyzeWindow.once('feel://analyzeReady', () => {
+                analyzeWindow.emit('feel://analyzeStart', map!);
+            })
         });
     }
 
-    function onRefDragMove(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setRefsData(prev => {
-            const copy = [...prev]
-            copy[idx].x = Math.floor(e.target.x() / cellSize);
-            copy[idx].y = Math.floor(e.target.y() / cellSize);
-
-            return copy;
-        });
-    }
-
-    function onSampleDragMove(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setSamplesData(prev => {
-            const copy = [...prev]
-            copy[idx].x = Math.floor(e.target.x() / cellSize);
-            copy[idx].y = Math.floor(e.target.y() / cellSize);
-
-            return copy;
-        });
-    }
-
-    function onSampleDragStart(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setSamplesData(prev => {
-            const copy = [...prev]
-            copy[idx].x = Math.floor(e.target.x() / cellSize);
-            copy[idx].y = Math.floor(e.target.y() / cellSize);
-
-            return copy;
-        });
-    }
-
-    function onSampleDragEnd(e: Konva.KonvaEventObject<DragEvent>, idx: number) {
-        setSamplesData(prev => {
-            const copy = [...prev]
-            copy[idx].x = Math.floor(e.target.x() / cellSize);
-            copy[idx].y = Math.floor(e.target.y() / cellSize);
-
-            return copy;
-        });
-    }
-
-    function deleteRef(idx: number) {
-        const copy = [...refsData]
-        copy.splice(idx, 1)
-        setRefsData(copy)
-    }
-
-    function deleteSample(idx: number) {
-        const copy = [...samplesData]
-        copy.splice(idx, 1)
-        setSamplesData(copy)
-    }
-
-    function rotateSample(idx: number, angle: number) {
-        setSamplesData(prev => {
+    function onSampleUpdate(idx: number, value: Sample) {
+        setSamples(prev => {
             const copy = [...prev];
-            copy[idx].rotation = angle;
+            copy[idx] = value;
             return copy;
-        });
+        })
     }
 
     return (
@@ -372,24 +308,10 @@ function App() {
                                            onMouseMove={onMouseMove} onMouseDown={onMouseDown}>
                                         <Layer>
                                             {img && <KImage image={img}/>}
-                                            {tempSample && <SampleTempCanvas sample={tempSample} cellSize={cellSize}/>}
-                                            {samplesData.map((sample, idx) =>
-                                                <SampleCanvas key={`sample-${idx}`} idx={idx} sample={sample}
-                                                              cellSize={cellSize}
-                                                              onDragStart={(e) => onSampleDragStart(e, idx)}
-                                                              onDragMove={(e) => onSampleDragMove(e, idx)}
-                                                              onDragEnd={(e) => onSampleDragEnd(e, idx)}
-                                                />
+                                            {tempSample && <SampleCanvas index={-1} data={tempSample} cellSize={cellSize}/>}
+                                            {samples.map((sample, idx) =>
+                                                <SampleCanvas key={`sample-${idx}`} index={idx} data={sample} cellSize={cellSize} onUpdate={value => onSampleUpdate(idx, value)}/>
                                             )}
-                                            {refsData.map((circle, idx) =>
-                                                <RefCanvas key={`ref-${idx}`} idx={idx} data={circle}
-                                                           cellSize={cellSize}
-                                                           onDragStart={e => onRefDragStart(e, idx)}
-                                                           onDragMove={e => onRefDragMove(e, idx)}
-                                                           onDragEnd={e => onRefDragEnd(e, idx)}
-                                                />
-                                            )}
-                                            {tempRef && <RefTempCanvas data={tempRef} cellSize={cellSize}/>}
                                             {Array.from({length: width}).map((_, i) => (
                                                 <Line
                                                     key={`v-${i}`}
@@ -422,12 +344,12 @@ function App() {
                                         </span>
                                         <div className="input-group">
                                             <button
-                                                className={"btn btn" + (drawMode === DrawMode.Reference ? "-outline" : "") + "-primary"}
-                                                onClick={onDrawRefClicked}>Add Reference
+                                                className={"btn btn" + (drawMode === SampleShape.Circle ? "-outline" : "") + "-primary"}
+                                                onClick={onDrawCircleClicked}>Draw Circle
                                             </button>
                                             <button
-                                                className={"btn btn" + (drawMode === DrawMode.Sample ? "-outline" : "") + "-success"}
-                                                onClick={onDrawSampleClicked}>Add Sample
+                                                className={"btn btn" + (drawMode === SampleShape.Rect ? "-outline" : "") + "-success"}
+                                                onClick={onDrawRectClicked}>Draw Rect
                                             </button>
                                         </div>
                                     </div>
@@ -441,6 +363,9 @@ function App() {
                                     <div className="mb-3">
                                         <button className="btn btn-outline-primary" onClick={handleLoadMap}>
                                             Load Map
+                                        </button>
+                                        <button className="btn btn-success" disabled={map === null}
+                                                onClick={(_) => startAnalyze()}>Analyze
                                         </button>
                                     </div>
 
@@ -464,78 +389,16 @@ function App() {
                         </div>
                         {map && (
                             <div className="col">
-                                {refsData.map((refData, idx) => (
-                                    <RefCard key={`refcard-${idx}`} index={idx} data={refData}
-                                             calibrationCurve={calibrationCurve} map={map}
-                                             onDelete={() => deleteRef(idx)}></RefCard>
+                                {samples.map((sample, idx) => (
+                                    <SampleInfoCard key={`sample-card-${idx}`} index={idx} data={sample} calibrationCurve={calibrationCurve} map={map} />
                                 ))}
-                                {samplesData.map((sample, idx) => (
-                                        <SampleCard key={`samplecard-${idx}`} index={idx} data={sample}
-                                                    calibrationCurve={calibrationCurve} map={map}
-                                                    onDelete={() => deleteSample(idx)}
-                                                    onRotate={(angle) => rotateSample(idx, angle)}/>
-                                    )
-                                )}
                             </div>
                         )}
                     </div>
                 </main>
             </div>
-            {tempRef?.loading === -1 &&
-                <LoadingDialog onSubmit={value => setLoading(value)} onCancel={() => setTempRef(null)}/>}
         </>
     )
-
-}
-
-enum DrawMode {
-    None,
-    Reference,
-    Sample
-}
-
-
-function LoadingDialog({
-                           onSubmit,
-                           onCancel
-                       }: {
-    onSubmit: (value: number) => void;
-    onCancel: () => void
-}) {
-    const [value, setValue] = useState('');
-
-    return (
-        <div className="modal show d-block" tabIndex={-1} style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
-            <div className="modal-dialog">
-                <div className="modal-content">
-                    <div className="modal-header">
-                        <h5 className="modal-title">Enter Loading (µg/cm²)</h5>
-                    </div>
-                    <div className="modal-body">
-                        <input
-                            type="number"
-                            className="form-control"
-                            placeholder="ex. 120"
-                            value={value}
-                            onChange={(e) => setValue(e.target.value)}
-                        />
-                    </div>
-                    <div className="modal-footer">
-                        <button
-                            className="btn btn-primary"
-                            onClick={() => {
-                                const num = parseFloat(value);
-                                if (!isNaN(num)) onSubmit(num);
-                            }}
-                        >
-                            Confirm
-                        </button>
-                        <button className="btn btn-secondary" onClick={() => onCancel()}>Cancel</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
 }
 
 export default App;
