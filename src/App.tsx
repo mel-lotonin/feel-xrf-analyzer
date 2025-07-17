@@ -7,9 +7,7 @@ import {Image as KImage, Layer, Line, Stage} from "react-konva";
 import './ColorMaps.tsx'
 import {Color, MasoudMap} from "./ColorMaps.tsx";
 import Konva from "konva";
-import {getCurrentWebviewWindow, WebviewWindow} from "@tauri-apps/api/webviewWindow";
 import {Sample, SampleInfoCard, SampleShape, SampleType, SampleCanvas} from "./Sample.tsx";
-
 
 export interface CalibrationCurve {
     slope: number,
@@ -254,30 +252,20 @@ function App() {
         }
     }
 
-    async function startAnalyze() {
-        const analyzeWindow = new WebviewWindow('analyzeWindow', {
-            url: '/autodetect.html',
-            title: 'Autodetect Objects',
-            parent: getCurrentWebviewWindow()
-        });
-
-        analyzeWindow.once('tauri://error', function (e) {
-            console.error("Failed to create window", e);
-        });
-
-        analyzeWindow.once('tauri://created', () => {
-            analyzeWindow.once('feel://analyzeReady', () => {
-                analyzeWindow.emit('feel://analyzeStart', map!);
-            })
-        });
-    }
-
     function onSampleUpdate(idx: number, value: Sample) {
         setSamples(prev => {
             const copy = [...prev];
             copy[idx] = value;
             return copy;
-        })
+        });
+    }
+
+    function onDeleteSample(idx: number) {
+        setSamples(prev => {
+            const copy = [...prev];
+            copy.splice(idx, 1);
+            return copy;
+        });
     }
 
     return (
@@ -364,9 +352,6 @@ function App() {
                                         <button className="btn btn-outline-primary" onClick={handleLoadMap}>
                                             Load Map
                                         </button>
-                                        <button className="btn btn-success" disabled={map === null}
-                                                onClick={(_) => startAnalyze()}>Analyze
-                                        </button>
                                     </div>
 
                                     <div className="input-group">
@@ -389,8 +374,8 @@ function App() {
                         </div>
                         {map && (
                             <div className="col">
-                                {samples.map((sample, idx) => (
-                                    <SampleInfoCard key={`sample-card-${idx}`} index={idx} data={sample} calibrationCurve={calibrationCurve} map={map} onUpdate={value => onSampleUpdate(idx, value)} />
+                                {samples.map((x, idx) => ({x, idx})).sort((a, b) => a.x.type - b.x.type).map(({x: sample, idx}, _) => (
+                                    <SampleInfoCard key={`sample-card-${idx}`} index={idx} data={sample} calibrationCurve={calibrationCurve} map={map} onUpdate={value => onSampleUpdate(idx, value)} onDelete={() => onDeleteSample(idx)}/>
                                 ))}
                             </div>
                         )}

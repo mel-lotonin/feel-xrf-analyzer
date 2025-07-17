@@ -184,45 +184,61 @@ interface SampleCardProps {
 }
 
 export function SampleInfoCard({index, data, map, calibrationCurve, onDelete, onUpdate}: SampleCardProps) {
-    return (<div className="card mb-3">
+    function setLoading(value: string) {
+        const valueNum = parseFloat(value);
+        if (valueNum !== Infinity && valueNum !== -Infinity && !isNaN(valueNum))
+            onUpdate?.(new Sample(data.x, data.y, data.w, data.h, data.r, valueNum, data.type, data.shape, data.a));
+    }
+
+    return (
+        <div className="card mb-3">
             <div className="card-body">
                 <h6 className="card-title">{data.type === SampleType.Reference ? "Reference" : "Sample"} {index + 1}</h6>
-                <span className="card-text">
-                <div className="mb-3">
-                     <label className="form-label">Position</label>
-                    <input type="text" className="form-control"
-                           value={`(${data.x}, ${data.y})`} readOnly/>
-                </div>
-                <div className="mb-3">
-                    <label className="form-label">{data.shape === SampleShape.Rect ? "Dimensions" : "Radius"}</label>
-                    <input type="text" className="form-control"
-                           value={data.shape == SampleShape.Rect ? `${data.w}x${data.h}` : `${data.r}`} readOnly/>
-                </div>
-                <div className="mb-3">
-                    <label className="form-label">Counts</label>
-                    <input type="number" className="form-control"
-                           value={data.counts(map) !== null ? data.counts(map)! : "failed to compute counts"} readOnly/>
-                </div>
-                <div className="mb-3">
-                     <label className="form-label">Loading (est.)</label>
-                    <input type="number" className="form-control"
-                           value={(calibrationCurve !== undefined && data.counts(map) !== null) ? `${(calibrationCurve.slope * data.counts(map)! + calibrationCurve.int).toFixed(2)} µg/cm²` : "Not enough data to determine loading"}
-                           readOnly/>
-                </div>
-                <br/>
-                    <div className="btn-group-toggle" data-toggle="buttons">
-                        <label className="btn btn-secondary active">
-                        <input type="checkbox"
-                               checked={data.type == SampleType.Reference}
-                               onChange={e => onUpdate?.(new Sample(data.x, data.y, data.w, data.h, data.r, data.loading, e.target.checked ? SampleType.Reference : SampleType.Unknown, data.shape, data.a))}
-                        />
-                            {data.type == SampleType.Reference ? "Make Unknown" : "Make Reference"}
-                        </label>
-                    </div>
-                <button className="btn btn-danger"
-                        onClick={() => onDelete?.()}>Delete
-                </button>
-            </span>
+                    <span className="card-text">
+                        <div className="mb-3">
+                             <label className="form-label">Position</label>
+                            <input type="text" className="form-control"
+                                   value={`(${data.x}, ${data.y})`} readOnly/>
+                        </div>
+                        <div className="mb-3">
+                            <label className="form-label">{data.shape === SampleShape.Rect ? "Dimensions" : "Radius"}</label>
+                            <input type="text" className="form-control"
+                                   value={data.shape == SampleShape.Rect ? `${data.w}x${data.h}` : `${data.r}`} readOnly/>
+                        </div>
+                            <div className="mb-3">
+                             <label className="form-label">Rotation</label>
+                            <input type="number" className="form-control"
+                                   value={data.a}
+                                   onChange={e =>  onUpdate?.(new Sample(data.x, data.y, data.w, data.h, data.r, data.loading, data.type, data.shape, parseFloat(e.target.value)))}/>
+                        </div>
+                        <div className="mb-3">
+                            <label className="form-label">Counts</label>
+                            <input type="number" className="form-control"
+                                   value={data.counts(map) !== null ? data.counts(map)! : "failed to compute counts"} readOnly/>
+                        </div>
+                            {data.type === SampleType.Reference &&
+                                <div className="mb-3">
+                                    <label className="form-label">Loading (µg/cm²)</label>
+                                    <input type="number" className="form-control"
+                                           value={data.loading ?? undefined} onChange={e => setLoading(e.target.value)}/>
+                                </div>
+                            }
+                        <div className="mb-3">
+                             <label className="form-label">Loading (est., µg/cm²)</label>
+                            <input type="number" className="form-control"
+                                   value={(calibrationCurve !== undefined && data.counts(map) !== null) ? (calibrationCurve.slope * data.counts(map)! + calibrationCurve.int).toFixed(2) : 0}
+                                   readOnly/>
+                        </div>
+                        <div className="btn-group">
+                            <label className="btn btn-secondary active"><input type="checkbox"
+                                                                               checked={data.type == SampleType.Reference}
+                                                                               onChange={e => onUpdate?.(new Sample(data.x, data.y, data.w, data.h, data.r, data.loading, e.target.checked ? SampleType.Reference : SampleType.Unknown, data.shape, data.a))}
+                            />{data.type == SampleType.Reference ? "Make Unknown" : "Make Reference"}</label>
+                            <button className="btn btn-danger"
+                                    onClick={() => onDelete?.()}>Delete
+                            </button>
+                        </div>
+                </span>
             </div>
         </div>
     )
